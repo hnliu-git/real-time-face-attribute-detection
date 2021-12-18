@@ -1,6 +1,8 @@
 import face_recognition
 import cv2
 
+from model import MultiBinMobileNet
+
 # Below includes some basic performance tweaks to make things run a lot faster:
 #   1. Process each video frame at a smaller resolution (though still display it at full resolution)
 #   2. Only detect faces in every other frame of video.
@@ -17,6 +19,8 @@ beta = 8
 reduce_level = 2
 # Bool for processing other frame
 process_this_frame = True
+
+model = MultiBinMobileNet.load_from_checkpoint('fx-epoch=07-val_loss=8.2262897.ckpt').cuda().eval()
 
 while True:
     # Grab a single frame of video
