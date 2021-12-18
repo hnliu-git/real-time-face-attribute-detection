@@ -4,6 +4,11 @@ A real-time face attribute detection app, built based on Pytorch Lightning and f
 Recognized attributes can be found in [label.txt](models/labels.txt)
 The model is trained on the [Celeba](https://www.kaggle.com/jessicali9530/celeba-dataset) dataset
 
+# Dependencies
+- [face_recognition](https://github.com/ageitgey/face_recognition)
+- pytorch_lightening
+
+
 ## How to run
 
 train your own model
