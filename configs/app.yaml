@@ -1,0 +1,11 @@
+
+# For model configs
+model_path: 'models/fx-epoch=07-val_loss=8.2262897.ckpt'
+label_path: 'models/labels.txt'
+tagging: false
+threshold: 0.4 # for tagging model output
+
+# For preprocessing configs
+reduce_level: 2 # Extent of reducing to speed up the process
+alpha: 2 # Extent of scaling up the upper bound
+beta: 4 # Extent of scaling up the other bounds

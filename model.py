@@ -1,8 +1,9 @@
 
 from torch.optim import AdamW
 from torchvision import models
-from argparse import ArgumentParser
 from torch.optim.lr_scheduler import ReduceLROnPlateau
+
+from utils import calculate_metrics, calculate_tag_metrics
 
 import torch
 import torch.nn as nn
@@ -12,17 +13,12 @@ import torch.nn.functional as F
 
 class MultiBinMobileNet(pl.LightningModule):
 
-    @staticmethod
-    def add_model_specific_args(parent_parser):
-        parser = ArgumentParser(parents=[parent_parser], add_help=False)
-        parser.add_argument('--learning_rate', type=float, default=0.0001)
-        return parser
-
-    def __init__(self, n_classes):
+    def __init__(self, n_classes, lr):
         super().__init__()
 
         self.save_hyperparameters()
         self.n_classes = n_classes
+        self.lr = lr
         mnet = models.mobilenet_v2()
 
         # the input for the classifier should be two-dimensional, but we will have
@@ -42,42 +38,54 @@ class MultiBinMobileNet(pl.LightningModule):
         return [fc(x) for fc in self.fcs]
 
     def configure_optimizers(self):
-        optimizer = AdamW(self.parameters(), lr=1e-3)
+        optimizer = AdamW(self.parameters(), lr=self.lr)
         scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=1e-1, patience=2, verbose=True)
         return {'optimizer': optimizer, 'lr_scheduler': scheduler, 'monitor': 'val_loss'}
 
     def training_step(self, train_batch, batch_idx):
+        # Img [bsz, w, h, c]
         img, attrs = train_batch
         output = self.forward(img)
         attrs = torch.unbind(attrs, 1)
 
         train_loss = self.get_loss(output, attrs)
-        # total_loss += loss_train.item()
-        return {"train_loss": train_loss}
+        return {'loss': train_loss}
 
     def validation_step(self, val_batch, batch_idx):
         img, attrs = val_batch
         output = self.forward(img)
         attrs = torch.unbind(attrs, 1)
 
-        print(output[0].shape)
-        print(attrs[0].shape)
         val_loss = self.get_loss(output, attrs)
-        # total_loss += loss_train.item()
-        return {"val_loss", val_loss}
+        avg_acc, min_acc, max_acc = calculate_metrics(output, attrs)
+
+        return {"val_loss": val_loss, 'avg_acc': avg_acc, 'min_acc': min_acc, 'max_acc': max_acc}
+
+    def validation_epoch_end(self, outputs):
+        """"""
+        val_loss = torch.stack([x["val_loss"] for x in outputs]).mean()
+        avg_acc = sum([x['avg_acc'] for x in outputs]) / len(outputs)
+        max_acc = max([x['max_acc'] for x in outputs])
+        min_acc = min([x['min_acc'] for x in outputs])
+        self.log("val_loss", val_loss, prog_bar=True, logger=True)
+        self.log("avg_acc", avg_acc, prog_bar=True, logger=True)
+        self.log("max_acc", max_acc, prog_bar=True, logger=True)
+        self.log("min_acc", min_acc, prog_bar=True, logger=True)
 
     def get_loss(self, output, truth):
-        losses = sum([F.cross_entropy(output[i], truth[i]) for i in range(self.n_classes)])
+        losses = sum(
+            [F.cross_entropy(output[i], truth[i].type(torch.LongTensor).cuda()) for i in range(self.n_classes)])
         return losses
 
 
 class MultiTagMobileNet(pl.LightningModule):
 
-    def __init__(self, n_classes):
+    def __init__(self, n_classes, lr):
         super().__init__()
 
         self.save_hyperparameters()
         self.n_classes = n_classes
+        self.lr = lr
         mnet = models.mobilenet_v2()
 
         # the input for the classifier should be two-dimensional, but we will have
@@ -100,7 +108,7 @@ class MultiTagMobileNet(pl.LightningModule):
         return self.fc(x)
 
     def configure_optimizers(self):
-        optimizer = AdamW(self.parameters(), lr=1e-3)
+        optimizer = AdamW(self.parameters(), lr=self.lr)
         scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=1e-1, patience=2, verbose=True)
         return {'optimizer': optimizer, 'lr_scheduler': scheduler, 'monitor': 'val_loss'}
 
@@ -136,3 +144,4 @@ class MultiTagMobileNet(pl.LightningModule):
     def get_loss(self, output, truth):
         loss = F.binary_cross_entropy(output, truth)
         return loss
+
