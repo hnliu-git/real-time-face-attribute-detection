@@ -57,20 +57,17 @@ class MultiBinMobileNet(pl.LightningModule):
         attrs = torch.unbind(attrs, 1)
 
         val_loss = self.get_loss(output, attrs)
-        avg_acc, min_acc, max_acc = calculate_metrics(output, attrs)
+        accs = calculate_metrics(output, attrs, agg=True)
 
-        return {"val_loss": val_loss, 'avg_acc': avg_acc, 'min_acc': min_acc, 'max_acc': max_acc}
+        return {"val_loss": val_loss, 'accs': accs}
 
     def validation_epoch_end(self, outputs):
         """"""
         val_loss = torch.stack([x["val_loss"] for x in outputs]).mean()
-        avg_acc = sum([x['avg_acc'] for x in outputs]) / len(outputs)
-        max_acc = max([x['max_acc'] for x in outputs])
-        min_acc = min([x['min_acc'] for x in outputs])
+        avg_acc = sum([x['accs'] for x in outputs]) / len(outputs)
+        for i, acc in enumerate(avg_acc):
+          self.log('acc%d'%i, acc, prog_bar=True, logger=True)
         self.log("val_loss", val_loss, prog_bar=True, logger=True)
-        self.log("avg_acc", avg_acc, prog_bar=True, logger=True)
-        self.log("max_acc", max_acc, prog_bar=True, logger=True)
-        self.log("min_acc", min_acc, prog_bar=True, logger=True)
 
     def get_loss(self, output, truth):
         losses = sum(
@@ -80,11 +77,12 @@ class MultiBinMobileNet(pl.LightningModule):
 
 class MultiTagMobileNet(pl.LightningModule):
 
-    def __init__(self, n_classes, lr):
+    def __init__(self, labels, lr):
         super().__init__()
 
         self.save_hyperparameters()
-        self.n_classes = n_classes
+        self.labels = labels
+        self.n_classes = len(labels)
         self.lr = lr
         mnet = models.mobilenet_v2()
 
@@ -95,7 +93,7 @@ class MultiTagMobileNet(pl.LightningModule):
         self.base_model = mnet.features
         self.fc = nn.Sequential(
             nn.Dropout(p=0.2),
-            nn.Linear(in_features=mnet.last_channel, out_features=n_classes),
+            nn.Linear(in_features=mnet.last_channel, out_features=self.n_classes),
             nn.Sigmoid()
         )
 
@@ -126,20 +124,17 @@ class MultiTagMobileNet(pl.LightningModule):
         output = self.forward(img)
 
         val_loss = self.get_loss(output, attrs)
-        avg_acc, min_acc, max_acc = calculate_tag_metrics(output, attrs)
+        accs = calculate_tag_metrics(output, attrs, agg=False)
 
-        return {"val_loss": val_loss, 'avg_acc': avg_acc, 'min_acc': min_acc, 'max_acc': max_acc}
+        return {"val_loss": val_loss, 'accs': accs}
 
     def validation_epoch_end(self, outputs):
         """"""
         val_loss = torch.stack([x["val_loss"] for x in outputs]).mean()
-        avg_acc = sum([x['avg_acc'] for x in outputs]) / len(outputs)
-        max_acc = max([x['max_acc'] for x in outputs])
-        min_acc = min([x['min_acc'] for x in outputs])
+        avg_accs = sum([x['accs'] for x in outputs]) / len(outputs)
+        for i, acc in enumerate(avg_accs):
+          self.log(self.labels[i], acc, prog_bar=True, logger=True)
         self.log("val_loss", val_loss, prog_bar=True, logger=True)
-        self.log("avg_acc", avg_acc, prog_bar=True, logger=True)
-        self.log("max_acc", max_acc, prog_bar=True, logger=True)
-        self.log("min_acc", min_acc, prog_bar=True, logger=True)
 
     def get_loss(self, output, truth):
         loss = F.binary_cross_entropy(output, truth)
