@@ -20,7 +20,7 @@ def calculate_metrics(output, target):
     return avg_acc, min_acc, max_acc
 
 
-def calculate_tag_metrics(output, target, threshold=0.5):
+def calculate_tag_metrics(output, target, threshold=0.5, agg=True):
     """
     output: [B, n_classes]
     target: [B, n_classes]
@@ -33,10 +33,12 @@ def calculate_tag_metrics(output, target, threshold=0.5):
     target = [i.cpu().numpy() for i in target]
 
     accs = [accuracy_score(y_true=t, y_pred=np.squeeze(p)) for t, p in zip(target, predict)]
+    if agg:
+      avg_acc = sum(accs) / len(accs)
+      min_acc = min(accs)
+      max_acc = max(accs)
 
-    avg_acc = sum(accs) / len(accs)
-    min_acc = min(accs)
-    max_acc = max(accs)
-
-    return avg_acc, min_acc, max_acc
+      return avg_acc, min_acc, max_acc
+    else:
+      return np.array(accs)
 
