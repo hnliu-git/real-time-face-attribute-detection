@@ -19,7 +19,8 @@ attr_csv = os.path.join(cfgs['data_folder'], 'list_attr_celeba.csv')
 
 attrs = pd.read_csv('data/list_attr_celeba.csv').replace(-1, 0)
 
-n_classes = len(attrs.columns) - 1
+labels = attrs.columns[1:]
+n_classes = len(labels)
 # id2class = {i:classes[i+1] for i in range(n_classes)}
 
 
@@ -41,7 +42,7 @@ test_loader=DataLoader(test_data,batch_size=cfgs['batch_size'],num_workers=2)
 
 if cfgs['tagging']:
     print("Train a multi-tagging model")
-    model = MultiTagMobileNet(n_classes, float(cfgs['lr']))
+    model = MultiTagMobileNet(labels, float(cfgs['lr']))
 else:
     print("Train a multi-clf model")
     model = MultiBinMobileNet(n_classes, float(cfgs['lr']))
