@@ -92,12 +92,18 @@ while True:
 
             font = cv2.FONT_HERSHEY_DUPLEX
             try:
-                for i in range(0, len(face_attr_dict[face_id]), 3):
-                    face_attr_str = ", ".join(face_attr_dict[face_id][i:i + 3])
-                    cv2.putText(frame, face_attr_str, (left - 30, bottom + i * 5 + 10), font, 0.6, (255, 255, 255), 1)
+                if not "Female" in face_attr_dict[face_id]:
+                    if not "Male" in face_attr_dict[face_id]:
+                        face_attr_dict[face_id].append("Female")
+                # for i in range(0, len(face_attr_dict[face_id]), 3):
+                #     face_attr_str = ", ".join(face_attr_dict[face_id][i:i + 3])
+                #     cv2.putText(frame, face_attr_str, (left - 30, bottom + i * 5 + 10), font, 0.6, (255, 255, 255), 1)
+                for i in range(0, len(face_attr_dict[face_id])):
+                    face_attr_str = ", ".join(face_attr_dict[face_id][i:i + 1])
+                    cv2.putText(frame, face_attr_str, (left -175, top + i * 16), font, 0.6, (255, 255, 255), 1)
             except KeyError:
                 cv2.rectangle(frame, (left, bottom - 35), (right, bottom), (0, 0, 255), cv2.FILLED)
-                cv2.putText(frame, "New Face Detected: ID" + str(face_id), (left, bottom - 35), font, 0.6,
+                cv2.putText(frame, "New Face Detected: ID " + str(face_id), (left, bottom - 15), font, 0.6,
                             (255, 255, 255), 1)
 
     # process_this_frame = not process_this_frame
