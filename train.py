@@ -1,143 +1,72 @@
-
-from torch.optim import AdamW
-from torchvision import models
-from torch.optim.lr_scheduler import ReduceLROnPlateau
-
-from utils import calculate_metrics, calculate_tag_metrics
-
-import torch
-import torch.nn as nn
+import yaml
+import os
+import pandas as pd
 import pytorch_lightning as pl
-import torch.nn.functional as F
+
+from torch.utils.data import DataLoader
+from sklearn.model_selection import train_test_split
+from model import MultiBinMobileNet, MultiTagMobileNet
+from dataset import CelebDataset, valid_transform, train_transform
+
+from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.callbacks import LearningRateMonitor
+from pytorch_lightning.callbacks.early_stopping import EarlyStopping
+
+cfgs = yaml.load(open("configs/train.yaml"), Loader=yaml.FullLoader)
+
+img_folder = os.path.join(cfgs['data_folder'], 'img_align_celeba/img_align_celeba')
+attr_csv = os.path.join(cfgs['data_folder'], 'list_attr_celeba.csv')
+
+attrs = pd.read_csv('data/list_attr_celeba.csv').replace(-1, 0)
+
+labels = attrs.columns[1:]
+# n_classes = len(labels)
+# id2class = {i:classes[i+1] for i in range(n_classes)}
 
 
-class MultiBinMobileNet(pl.LightningModule):
+mean = [0.485, 0.456, 0.406]
+std = [0.229, 0.224, 0.225]
 
-    def __init__(self, labels, lr):
-        super().__init__()
+train_df, test = train_test_split(attrs, test_size=0.1, shuffle=True, random_state=cfgs['seed'])
+valid_df, test_df = train_test_split(test, test_size=0.5, random_state=cfgs['seed'])
 
-        self.save_hyperparameters()
-        self.labels = labels
-        self.n_classes = len(labels)
-        self.lr = lr
-        mnet = models.mobilenet_v2()
+train_data = CelebDataset(train_df, img_folder, train_transform)
+valid_data = CelebDataset(valid_df, img_folder, valid_transform)
+test_data = CelebDataset(test_df, img_folder, valid_transform)
 
-        # the input for the classifier should be two-dimensional, but we will have
-        # [batch_size, channels, width, height]
-        # so, let's do the spatial averaging: reduce width and height to 1
-        self.pool = nn.AdaptiveAvgPool2d((1, 1))
-        self.base_model = mnet.features
-        self.fcs = [nn.Sequential(nn.Dropout(p=0.2), nn.Linear(in_features=mnet.last_channel, out_features=2)).cuda()
-                    for _ in range(self.n_classes)]
+pl.seed_everything(cfgs['seed'])
 
-    def forward(self, x):
-        x = self.base_model(x)
-        x = self.pool(x)
-        # reshape from [batch, channels, 1, 1] to [batch, channels] to put it into classifier
-        x = torch.flatten(x, 1)
+train_loader=DataLoader(train_data,batch_size=cfgs['batch_size'],shuffle=True,num_workers=2)
+valid_loader=DataLoader(valid_data,batch_size=cfgs['batch_size'],num_workers=2)
+test_loader=DataLoader(test_data,batch_size=cfgs['batch_size'],num_workers=2)
 
-        return [fc(x) for fc in self.fcs]
+if cfgs['tagging']:
+    print("Train a multi-tagging model")
+    model = MultiTagMobileNet(labels, float(cfgs['lr']))
+else:
+    print("Train a multi-clf model")
+    model = MultiBinMobileNet(labels, float(cfgs['lr']))
 
-    def configure_optimizers(self):
-        optimizer = AdamW(self.parameters(), lr=self.lr)
-        scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=1e-1, patience=2, verbose=True)
-        return {'optimizer': optimizer, 'lr_scheduler': scheduler, 'monitor': 'val_loss'}
+# Callbacks:
+checkpoint = ModelCheckpoint(
+    dirpath=cfgs['model_save_dir'],
+    filename="./fx-{epoch:02d}-{val_loss:.7f}",
+    monitor="val_loss"
+)
 
-    def training_step(self, train_batch, batch_idx):
-        # Img [bsz, w, h, c]
-        img, attrs = train_batch
-        output = self.forward(img)
-        attrs = torch.unbind(attrs, 1)
+earlystopping = EarlyStopping(monitor='val_loss',
+                              min_delta=0.01,
+                              patience=5,
+                              verbose=False,
+                              mode="min")
 
-        train_loss = self.get_loss(output, attrs)
-        return {'loss': train_loss}
+trainer = pl.Trainer(
+    gpus=1,
+    limit_train_batches=100,
+    max_epochs=int(cfgs['n_epochs']),
+    enable_checkpointing=True,
+    check_val_every_n_epoch=1,
+    callbacks=[checkpoint, earlystopping, LearningRateMonitor()]
+)
 
-    def validation_step(self, val_batch, batch_idx):
-        img, attrs = val_batch
-        output = self.forward(img)
-        attrs = torch.unbind(attrs, 1)
-
-        val_loss = self.get_loss(output, attrs)
-        accs = calculate_metrics(output, attrs, agg=False)
-
-        return {"val_loss": val_loss, 'accs': accs}
-
-    def validation_epoch_end(self, outputs):
-        """"""
-        val_loss = torch.stack([x["val_loss"] for x in outputs]).mean()
-        avg_accs = sum([x['accs'] for x in outputs]) / len(outputs)
-        for i, acc in enumerate(avg_accs):
-          self.log(self.labels[i], acc, prog_bar=True, logger=True)
-        self.log("val_loss", val_loss, prog_bar=True, logger=True)
-
-    def get_loss(self, output, truth):
-        losses = sum(
-            [F.cross_entropy(output[i], truth[i].type(torch.LongTensor).cuda()) for i in range(self.n_classes)])
-        return losses
-
-
-class MultiTagMobileNet(pl.LightningModule):
-
-    def __init__(self, labels, lr):
-        super().__init__()
-
-        self.save_hyperparameters()
-        self.labels = labels
-        self.n_classes = len(labels)
-        self.lr = lr
-        mnet = models.mobilenet_v2()
-
-        # the input for the classifier should be two-dimensional, but we will have
-        # [batch_size, channels, width, height]
-        # so, let's do the spatial averaging: reduce width and height to 1
-        self.pool = nn.AdaptiveAvgPool2d((1, 1))
-        self.base_model = mnet.features
-        self.fc = nn.Sequential(
-            nn.Dropout(p=0.2),
-            nn.Linear(in_features=mnet.last_channel, out_features=self.n_classes),
-            nn.Sigmoid()
-        )
-
-    def forward(self, x):
-        x = self.base_model(x)
-        x = self.pool(x)
-        # reshape from [batch, channels, 1, 1] to [batch, channels] to put it into classifier
-        x = torch.flatten(x, 1)
-
-        return self.fc(x)
-
-    def configure_optimizers(self):
-        optimizer = AdamW(self.parameters(), lr=self.lr)
-        scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=1e-1, patience=2, verbose=True)
-        return {'optimizer': optimizer, 'lr_scheduler': scheduler, 'monitor': 'val_loss'}
-
-    def training_step(self, train_batch, batch_idx):
-        # Img [bsz, w, h, c]
-        img, attrs = train_batch
-        # [bsz, n_classes]
-        output = self.forward(img)
-
-        train_loss = self.get_loss(output, attrs)
-        return {'loss': train_loss}
-
-    def validation_step(self, val_batch, batch_idx):
-        img, attrs = val_batch
-        output = self.forward(img)
-
-        val_loss = self.get_loss(output, attrs)
-        accs = calculate_tag_metrics(output, attrs, agg=False)
-
-        return {"val_loss": val_loss, 'accs': accs}
-
-    def validation_epoch_end(self, outputs):
-        """"""
-        val_loss = torch.stack([x["val_loss"] for x in outputs]).mean()
-        avg_accs = sum([x['accs'] for x in outputs]) / len(outputs)
-        for i, acc in enumerate(avg_accs):
-          self.log(self.labels[i], acc, prog_bar=True, logger=True)
-        self.log("val_loss", val_loss, prog_bar=True, logger=True)
-
-    def get_loss(self, output, truth):
-        loss = F.binary_cross_entropy(output, truth)
-        return loss
-
+trainer.fit(model, train_loader, valid_loader)
