@@ -2,7 +2,7 @@ import torch
 import numpy as np
 
 
-def calculate_metrics(output, target):
+def calculate_metrics(output, target, agg=True):
     """
     output: list of tensor from fc, [(B, H)]
     target: list of label [B]
@@ -13,11 +13,15 @@ def calculate_metrics(output, target):
     target = [i.cpu() for i in target]
 
     accs = [accuracy_score(y_true=t.numpy(), y_pred=p.numpy()) for t, p in zip(target, predict)]
-    avg_acc = sum(accs) / len(accs)
-    min_acc = min(accs)
-    max_acc = max(accs)
+    if agg:
+      avg_acc = sum(accs) / len(accs)
+      min_acc = min(accs)
+      max_acc = max(accs)
 
-    return avg_acc, min_acc, max_acc
+      return avg_acc, min_acc, max_acc
+    else:
+      return np.array(accs)
+
 
 
 def calculate_tag_metrics(output, target, threshold=0.5, agg=True):
