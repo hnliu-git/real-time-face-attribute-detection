@@ -23,9 +23,9 @@ face_attr_dict = {}
 process_this_frame = True
 
 if cfgs['tagging']:
-    model = MultiTagMobileNet.load_from_checkpoint(cfgs['model_path'], lr=None).cuda().eval()
+    model = MultiTagMobileNet.load_from_checkpoint(cfgs['model_path'], labels=labels, lr=None).cuda().eval()
 else:
-    model = MultiBinMobileNet.load_from_checkpoint(cfgs['model_path'], lr=None).cuda().eval()
+    model = MultiBinMobileNet.load_from_checkpoint(cfgs['model_path'], labels=labels, lr=None).cuda().eval()
 
 while True:
     # Grab a single frame of video
